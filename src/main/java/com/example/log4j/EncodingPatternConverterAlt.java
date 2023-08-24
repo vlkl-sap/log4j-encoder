@@ -30,6 +30,8 @@ import org.apache.logging.log4j.core.pattern.PatternFormatter;
 import org.apache.logging.log4j.core.pattern.PatternParser;
 import org.apache.logging.log4j.core.pattern.ThrowablePatternConverter;
 
+import org.apache.logging.log4j.core.impl.Log4jLogEvent;
+
 import org.apache.logging.log4j.util.EnglishEnums;
 import org.apache.logging.log4j.util.PerformanceSensitive;
 import org.apache.logging.log4j.util.StringBuilders;
@@ -41,8 +43,8 @@ import static org.apache.logging.log4j.util.Chars.LF;
  * Converter that encodes the output from a pattern using a specified format. Supported formats include HTML
  * (default) and JSON.
  */
-@Plugin(name = "encode", category = PatternConverter.CATEGORY)
-@ConverterKeys({"enc", "encode"})
+@Plugin(name = "myencodealt", category = PatternConverter.CATEGORY)
+@ConverterKeys({"myencalt", "myencodealt"})
 @PerformanceSensitive("allocation")
 public final class EncodingPatternConverterAlt extends LogEventPatternConverter {
 
@@ -56,7 +58,7 @@ public final class EncodingPatternConverterAlt extends LogEventPatternConverter 
      * @param escapeFormat the escape format strategy to use for encoding output of formatters
      */
     private EncodingPatternConverterAlt(final List<PatternFormatter> formatters,
-                                     final EscapeFormat escapeFormat) {
+                                        final EscapeFormat escapeFormat) {
         super("encode", "encode");
         this.formatters = formatters;
         this.escapeFormat = escapeFormat;
@@ -93,16 +95,28 @@ public final class EncodingPatternConverterAlt extends LogEventPatternConverter 
         return new EncodingPatternConverterAlt(formatters, escapeFormat);
     }
 
+
+    private LogEvent encodeEvent(LogEvent e) {
+        return new Log4jLogEvent.Builder(e).setThrown(Encoder.encode(e.getThrown())).build();
+    }
+
+
     /**
      * {@inheritDoc}
      */
     @Override
     public void format(final LogEvent event, final StringBuilder toAppendTo) {
         final int start = toAppendTo.length();
-        for (int i = 0; i < formatters.size(); i++) {
-            formatters.get(i).format(event, toAppendTo);
+        for (PatternFormatter f: formatters) {
+            StringBuilder sb = new StringBuilder();
+            if (f.getConverter() instanceof ThrowablePatternConverter) {
+                f.format(encodeEvent(event), sb);
+            } else {
+                f.format(event, sb);
+                escapeFormat.escape(sb, 0);
+            }
+            toAppendTo.append(sb);
         }
-        escapeFormat.escape(toAppendTo, start);
     }
 
     private enum EscapeFormat {
@@ -218,6 +232,23 @@ public final class EncodingPatternConverterAlt extends LogEventPatternConverter 
             @Override
             void escape(final StringBuilder toAppendTo, final int start) {
                 StringBuilders.escapeXml(toAppendTo, start);
+            }
+        },
+
+        URL {
+            @Override
+            void escape(final StringBuilder toAppendTo, final int start) {
+                String tail = toAppendTo.substring(start);
+                String tailEncoded;
+                try {
+                    tailEncoded = java.net.URLEncoder.encode(tail, "UTF-8");
+                } catch(java.io.UnsupportedEncodingException e) {
+                    e.printStackTrace();
+                    return;
+                }
+                if (tail.equals(tailEncoded)) return;
+                toAppendTo.setLength(start);
+                toAppendTo.append(tailEncoded);
             }
         };
 
