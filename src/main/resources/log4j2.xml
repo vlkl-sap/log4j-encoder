@@ -2,7 +2,7 @@
 <Configuration status="warn" strict="true">
     <Appenders>
         <Console name="POORENCODER" target="SYSTEM_OUT">
-            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level - %enc{%m}{HTML}%n"/>
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level - %enc{%m%ex}{HTML}%n"/>
         </Console>
     </Appenders>
     <Loggers>

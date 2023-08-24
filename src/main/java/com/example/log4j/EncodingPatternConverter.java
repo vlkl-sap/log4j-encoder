@@ -17,6 +17,9 @@
 package com.example.log4j;
 
 import java.util.List;
+import java.util.Set;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.config.Configuration;
@@ -41,8 +44,8 @@ import static org.apache.logging.log4j.util.Chars.LF;
  * Converter that encodes the output from a pattern using a specified format. Supported formats include HTML
  * (default) and JSON.
  */
-@Plugin(name = "encode", category = PatternConverter.CATEGORY)
-@ConverterKeys({"enc", "encode"})
+@Plugin(name = "myencode", category = PatternConverter.CATEGORY)
+@ConverterKeys({"myenc", "myencode"})
 @PerformanceSensitive("allocation")
 public final class EncodingPatternConverter extends LogEventPatternConverter {
 
@@ -93,16 +96,24 @@ public final class EncodingPatternConverter extends LogEventPatternConverter {
         return new EncodingPatternConverter(formatters, escapeFormat);
     }
 
+
     /**
      * {@inheritDoc}
      */
     @Override
     public void format(final LogEvent event, final StringBuilder toAppendTo) {
         final int start = toAppendTo.length();
-        for (int i = 0; i < formatters.size(); i++) {
-            formatters.get(i).format(event, toAppendTo);
+        for (PatternFormatter f: formatters) {
+            StringBuilder sb = new StringBuilder();
+            if (f.getConverter() instanceof ThrowablePatternConverter) {
+                f.format(event, sb);
+                sb = escapeFormat.escape(sb, 0, event.getThrown());
+            } else {
+                f.format(event, sb);
+                escapeFormat.escape(sb, 0);
+            }
+            toAppendTo.append(sb);
         }
-        escapeFormat.escape(toAppendTo, start);
     }
 
     private enum EscapeFormat {
@@ -219,6 +230,23 @@ public final class EncodingPatternConverter extends LogEventPatternConverter {
             void escape(final StringBuilder toAppendTo, final int start) {
                 StringBuilders.escapeXml(toAppendTo, start);
             }
+        },
+
+        URL {
+            @Override
+            void escape(final StringBuilder toAppendTo, final int start) {
+                String tail = toAppendTo.substring(start);
+                String tailEncoded;
+                try {
+                    tailEncoded = java.net.URLEncoder.encode(tail, "UTF-8");
+                } catch(java.io.UnsupportedEncodingException e) {
+                    e.printStackTrace();
+                    return;
+                }
+                if (tail.equals(tailEncoded)) return;
+                toAppendTo.setLength(start);
+                toAppendTo.append(tailEncoded);
+            }
         };
 
         /**
@@ -228,5 +256,38 @@ public final class EncodingPatternConverter extends LogEventPatternConverter {
          * @param start      where to start escaping from
          */
         abstract void escape(final StringBuilder toAppendTo, final int start);
+
+
+
+        StringBuilder escape(final StringBuilder source, final int start, final Throwable t) {
+            if (t==null) return source;
+            StringBuilder target = new StringBuilder();
+            int end = escape(source, start, target, t,
+                             Collections.newSetFromMap(new IdentityHashMap<>()));
+            target.append(source.substring(end, source.length()));
+            return target;
+        }
+
+        private int escape(final StringBuilder source, final int start,
+                           StringBuilder target,
+                           final Throwable t, Set<Throwable> dejaVu) {
+            String msg = t.toString();
+            int msgStart = source.indexOf(msg, start);
+            int msgEnd = msgStart + msg.length();
+            target.append(source.substring(start,msgStart));
+            int colon = msg.indexOf(":");
+            int targetLen = target.length();
+            target.append(msg);
+            escape(target, targetLen+colon+2);
+            int end = msgEnd;
+            if (dejaVu.contains(t)) return end;
+            dejaVu.add(t);
+            for (Throwable se : t.getSuppressed()) end = escape(source, msgEnd, target, se, dejaVu);
+
+            Throwable cause = t.getCause();
+            if (cause != null) end = escape(source, msgEnd, target, cause, dejaVu);
+            return end;
+        }
+
     }
 }
